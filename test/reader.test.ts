@@ -21,4 +21,10 @@ test("renders readable repost sections with embedded original pictures", async (
   expect(html).toContain("<h2>原微博</h2>");
   expect(html).toContain("转发 &lt;正文&gt;");
   expect(html).toContain('src="data:image/jpeg;base64,AQID"');
+  expect(html).toContain('<main class="kara-recap-reader">');
+  const styles = html.match(/<style>(.*?)<\/style>/s)?.[1];
+  expect(styles).toBeDefined();
+  const selectors = [...styles!.matchAll(/([^{}]+)\{/g)].map((match) => match[1].trim());
+  expect(selectors.length).toBeGreaterThan(0);
+  expect(selectors.every((selector) => selector.startsWith(".kara-recap-reader"))).toBe(true);
 });
