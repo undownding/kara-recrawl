@@ -12,7 +12,7 @@
 
 ## Docker 运行
 
-将镜像名替换为仓库的实际 GitHub 路径。每次 `main` 分支有新提交，GitHub Actions 会构建并推送 `ghcr.io/<owner>/<repo>:latest`，同时发布短 SHA 标签。也可本地构建：
+每次 `main` 分支有新提交，GitHub Actions 会构建并推送 `ghcr.io/undownding/kara-recrawl:latest`，同时发布短 SHA 标签。也可本地构建：
 
 ```sh
 docker build -t kara-recap:local .
@@ -23,22 +23,22 @@ docker run --rm --env-file .env -p 3000:3000 --shm-size=1g kara-recap:local
 
 ### TrueNAS Reader 直写
 
-你的 Karakeep ixVolume 位于 `/mnt/.ix-apps/app_mounts/karakeep/data`。在 `.env` 中设置：
+你的 Karakeep ixVolume 位于 `/mnt/.ix-apps/app_mounts/karakeep/data`。仓库中的 `compose.yaml` 已使用该目录、宿主机端口 `13000`、1 GiB Chromium 共享内存及健康检查。先在 TrueNAS 主机上把 `.env.example` 复制为 `.env`，配置 API key、webhook token，以及：
 
 ```dotenv
 KARAKEEP_DB_PATH=/mnt/.ix-apps/app_mounts/karakeep/data/db.db
 ```
 
-在同一台 TrueNAS 主机上运行时，挂载整个目录，以便 SQLite 的 WAL 文件留在同一挂载点：
+如果从 TrueNAS Shell 使用 Docker Compose，把仓库和 `.env` 放在同一目录，然后运行：
 
 ```sh
-docker run --rm --network host --user 0:0 --env-file /你的/kara-recap/.env \
-  --shm-size=1g \
-  --mount type=bind,source=/mnt/.ix-apps/app_mounts/karakeep/data,target=/mnt/.ix-apps/app_mounts/karakeep/data \
-  ghcr.io/<owner>/<repo>:latest
+docker compose up -d
+docker compose logs -f kara-recrawl
 ```
 
-`--user 0:0` 适用于当前以 root 拥有数据文件的 TrueNAS 安装；若权限不同，使用对数据目录有写权限的 UID/GID。数据库路径不存在时，归档及附件仍会回写，只有 Reader 直写跳过。若后来在 Karakeep 中手动重新抓取，内置 Reader 内容可能再次覆盖生成的页面。
+在 Karakeep 中设置 webhook URL 为 `http://<TrueNAS主机地址>:13000/webhook`，并在 Karakeep 应用自身设置 `CRAWLER_ALLOWED_INTERNAL_HOSTNAMES` 允许该主机名。如果通过 TrueNAS **Apps → Discover Apps → Custom App → Install via YAML** 粘贴 `compose.yaml`，要先把 `env_file: .env` 改为 TrueNAS 主机上 `.env` 的**绝对路径**；TrueNAS 不会从本仓库目录读取相对路径。Karakeep API 的 `KARAKEEP_URL` 也必须是这个容器能访问的地址。镜像若为私有包，还需先为 TrueNAS 配置 GHCR 拉取凭据。
+
+挂载整个数据目录可让 SQLite 的 WAL 文件与数据库位于同一挂载点。`user: "0:0"` 适用于当前以 root 拥有数据文件的 TrueNAS 安装；若权限不同，使用对数据目录有写权限的 UID/GID。数据库路径不存在时，归档及附件仍会回写，只有 Reader 直写跳过。若后来在 Karakeep 中手动重新抓取，内置 Reader 内容可能再次覆盖生成的页面。
 
 ## 本地开发
 

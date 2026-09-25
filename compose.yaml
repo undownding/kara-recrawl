@@ -1,0 +1,28 @@
+services:
+  kara-recrawl:
+    image: ghcr.io/undownding/kara-recrawl:latest
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    user: "0:0"
+    env_file:
+      - .env
+    ports:
+      - "13000:3000"
+    shm_size: 1gb
+    volumes:
+      - type: bind
+        source: /mnt/.ix-apps/app_mounts/karakeep/data
+        target: /mnt/.ix-apps/app_mounts/karakeep/data
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const response = await fetch('http://127.0.0.1:3000/health'); if (!response.ok) process.exit(1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
