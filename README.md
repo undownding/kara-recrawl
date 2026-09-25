@@ -1,8 +1,10 @@
 # kara-recap
 
-收到 Karakeep 的 `crawled` webhook 后，用 Bun + TypeScript 重新处理对应书签。目前支持 `m.weibo.cn/status/{id}`、`weibo.cn/status/{id}` 以及可解析到这些地址的微博分享链接。其他 URL 会跳过，不修改书签。
+收到 Karakeep 的 `crawled` webhook 后，用 Bun + TypeScript 重新处理对应书签。目前支持 `m.weibo.cn/status/{id}`、`weibo.cn/status/{id}` 及微博分享链接，也支持小红书图文笔记的 `discovery/item/{id}`、`explore/{id}` 和 `xhslink.cn/o/...` 短链。其他 URL 会跳过，不修改书签。
 
 微博正文会生成便于阅读的 HTML，通过 SingleFile 接口回写为原书签的 `precrawledArchive`；顶层正文成为书签标题，全部正文进入描述。最内层原微博配图作为 `bannerImage`，转发链配图作为 `bookmarkAsset`，并附加网页截图。若 `KARAKEEP_DB_PATH` 指向可写的 Karakeep 数据库，服务还会将 HTML 归档设为 Reader 内容；路径未设置或文件不存在时跳过这一步。
+
+小红书只提取图文笔记的标题、正文和全部配图，不提取评论。首图作为 `bannerImage`，其余图片作为 `bookmarkAsset`，并生成 Reader HTML 和关闭登录弹窗后的网页截图。视频笔记会报错。小红书页面若直接跳转到独立登录页，需要配置 `WEBVIEW_PROFILE_DIR`，并在该浏览器资料目录中预先登录；关闭弹窗无法绕过独立登录页。
 
 ## 配置 webhook
 
@@ -19,7 +21,7 @@ docker build -t kara-recap:local .
 docker run --rm --env-file .env -p 3000:3000 --shm-size=1g kara-recap:local
 ```
 
-镜像包含 Chromium、Noto CJK 中文字体和 emoji 字体。要跳过截图，设置 `SKIP_SCREENSHOT=1`。若微博需要登录，可设置 `WEBVIEW_PROFILE_DIR` 并挂载持久浏览器资料目录；微博 JSON 接口如需登录，也可设置 `WEIBO_COOKIE`。请勿提交 `.env`。需要保留生成的 HTML 时，设置 `READER_OUTPUT_DIR=/output` 并挂载该目录。
+镜像包含 Chromium、Noto CJK 中文字体和 emoji 字体。要跳过截图，设置 `SKIP_SCREENSHOT=1`。若微博或小红书需要登录，可设置 `WEBVIEW_PROFILE_DIR` 并挂载持久浏览器资料目录；微博 JSON 接口如需登录，也可设置 `WEIBO_COOKIE`。请勿提交 `.env`。需要保留生成的 HTML 时，设置 `READER_OUTPUT_DIR=/output` 并挂载该目录。
 
 ### TrueNAS Reader 直写
 

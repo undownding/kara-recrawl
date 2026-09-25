@@ -9,9 +9,10 @@ import {
   sanitizedChineseImageFileName,
   screenshotFileName,
 } from "./naming";
-import { buildReaderHtml } from "./reader";
+import { buildReaderHtml, buildXiaohongshuReaderHtml } from "./reader";
 import { promoteArchiveToReader } from "./promote-reader";
 import { fetchWeibo } from "./weibo";
+import { captureXiaohongshu, resolveXiaohongshuUrl, xiaohongshuNoteId } from "./xiaohongshu";
 
 const IMAGE_LIMIT = 30 * 1024 * 1024;
 
@@ -46,17 +47,25 @@ async function resolveWeiboShareUrl(url: URL): Promise<URL> {
   return new URL(location, url);
 }
 
-async function downloadImage(value: string): Promise<Blob> {
+async function downloadImage(
+  value: string,
+  source: "weibo" | "xiaohongshu" = "weibo",
+): Promise<Blob> {
   const url = new URL(value);
   if (url.protocol === "http:") url.protocol = "https:";
-  if (
-    url.protocol !== "https:" ||
-    !(url.hostname === "sinaimg.cn" || url.hostname.endsWith(".sinaimg.cn"))
-  ) {
-    throw new Error(`Unexpected Weibo image host: ${url.hostname}`);
-  }
+  const allowed =
+    source === "weibo"
+      ? url.hostname === "sinaimg.cn" || url.hostname.endsWith(".sinaimg.cn")
+      : ["xhscdn.com", "xiaohongshu.com"].some(
+          (host) => url.hostname === host || url.hostname.endsWith(`.${host}`),
+        );
+  if (url.protocol !== "https:" || !allowed)
+    throw new Error(`Unexpected ${source} image host: ${url.hostname}`);
   const response = await fetch(url, {
-    headers: { referer: "https://m.weibo.cn/", "user-agent": "Mozilla/5.0" },
+    headers: {
+      referer: source === "weibo" ? "https://m.weibo.cn/" : "https://www.xiaohongshu.com/",
+      "user-agent": "Mozilla/5.0",
+    },
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`Image download failed: HTTP ${response.status} ${url}`);
@@ -72,18 +81,19 @@ async function downloadImage(value: string): Promise<Blob> {
 async function ensureArchiveContent(
   client: KarakeepClient,
   bookmark: Bookmark,
-  capture: Awaited<ReturnType<typeof fetchWeibo>>,
-  images: Blob[],
+  html: string,
   canonicalUrl: string,
+  prefix: "weibo" | "xiaohongshu",
 ): Promise<ReaderArchive> {
-  const html = await buildReaderHtml(capture, images, canonicalUrl);
   const outputDir = Bun.env.READER_OUTPUT_DIR;
-  const outputPath = outputDir ? join(outputDir, `weibo-${bookmark.id}-reader.html`) : undefined;
+  const outputPath = outputDir
+    ? join(outputDir, `${prefix}-${bookmark.id}-reader.html`)
+    : undefined;
   if (outputDir && outputPath) {
     await mkdir(outputDir, { recursive: true });
     await Bun.write(outputPath, html);
   }
-  const fileName = `weibo-${new URL(canonicalUrl).pathname.split("/").pop()}-reader.html`;
+  const fileName = `${prefix}-${new URL(canonicalUrl).pathname.split("/").pop()}-reader.html`;
   let imported: Bookmark;
   try {
     imported = await client.importSingleFile(bookmark.content?.url ?? canonicalUrl, html, fileName);
@@ -138,17 +148,93 @@ async function writeReaderIfAvailable(
   return true;
 }
 
+async function processXiaohongshu(
+  client: KarakeepClient,
+  bookmark: Bookmark,
+  url: URL,
+): Promise<string> {
+  const id = xiaohongshuNoteId(url);
+  if (!id) throw new Error(`Unsupported Xiaohongshu note URL: ${url}`);
+  const skipScreenshot = Bun.env.SKIP_SCREENSHOT === "1";
+  const { capture, screenshot: shot } = await captureXiaohongshu(url, !skipScreenshot);
+  if (capture.images.length > 100)
+    throw new Error(`Too many Xiaohongshu images: ${capture.images.length}`);
+  const images: Blob[] = [];
+  for (const image of capture.images) images.push(await downloadImage(image.url, "xiaohongshu"));
+  const html = await buildXiaohongshuReaderHtml(capture, images, url.href);
+  const archive = await ensureArchiveContent(client, bookmark, html, url.href, "xiaohongshu");
+  const current = await client.getBookmark(bookmark.id);
+  const assets = current.assets ?? [];
+  for (const [index, blob] of images.entries()) {
+    const ext =
+      blob.type === "image/png"
+        ? "png"
+        : blob.type === "image/webp"
+          ? "webp"
+          : blob.type === "image/gif"
+            ? "gif"
+            : "jpg";
+    const fileName = `xiaohongshu-${id}-image-${String(index + 1).padStart(2, "0")}.${ext}`;
+    const assetType = index === 0 ? "bannerImage" : "bookmarkAsset";
+    if (assets.some((asset) => asset.assetType === assetType && asset.fileName === fileName))
+      continue;
+    const assetId = await client.upload(blob, fileName);
+    if (index === 0) {
+      const existingBanner = assets.find(
+        (asset) => asset.assetType === "bannerImage" && !asset.fileName,
+      );
+      if (existingBanner) {
+        await client.replaceAsset(bookmark.id, existingBanner.id, assetId);
+        existingBanner.id = assetId;
+        existingBanner.fileName = fileName;
+        continue;
+      }
+    }
+    await client.attachAsset(bookmark.id, assetId, assetType);
+    assets.push({ id: assetId, fileName, assetType });
+  }
+  const screenshotName = `xiaohongshu-${id}-screenshot.png`;
+  if (
+    shot &&
+    !assets.some((asset) => asset.assetType === "screenshot" && asset.fileName === screenshotName)
+  ) {
+    const assetId = await client.upload(shot, screenshotName);
+    const oldShot = assets.find((asset) => asset.assetType === "screenshot" && !asset.fileName);
+    if (oldShot) await client.replaceAsset(bookmark.id, oldShot.id, assetId);
+    else await client.attachAsset(bookmark.id, assetId, "screenshot");
+  }
+  await client.updateBookmark(bookmark.id, capture.title, capture.description);
+  const readerReady = await writeReaderIfAvailable(
+    client,
+    bookmark,
+    archive,
+    bookmark.content?.url ?? url.href,
+  );
+  if (skipScreenshot)
+    return `updated Xiaohongshu without screenshot (Reader ${readerReady ? "ready" : "skipped"})`;
+  return readerReady
+    ? "updated Xiaohongshu with Reader"
+    : "updated Xiaohongshu archive only (Reader skipped)";
+}
+
 export async function processBookmark(client: KarakeepClient, bookmark: Bookmark): Promise<string> {
   const initial = bookmark.content ? bookmark : await client.getBookmark(bookmark.id);
   const rawUrl = initial.content?.type === "link" ? initial.content.url : undefined;
   let url: URL | undefined;
   try {
-    if (rawUrl) url = await resolveWeiboShareUrl(new URL(rawUrl));
+    if (rawUrl) {
+      const parsed = new URL(rawUrl);
+      url =
+        parsed.hostname === "xhslink.cn"
+          ? await resolveXiaohongshuUrl(parsed)
+          : await resolveWeiboShareUrl(parsed);
+    }
   } catch (error) {
-    if (rawUrl?.includes("mapp.api.weibo.cn"))
-      throw new Error(`Could not resolve Weibo share URL: ${rawUrl}`, { cause: error });
+    if (rawUrl && /(?:mapp\.api\.weibo\.cn|xhslink\.cn)/.test(rawUrl))
+      throw new Error(`Could not resolve share URL: ${rawUrl}`, { cause: error });
     // Invalid URLs cannot match a strategy.
   }
+  if (url && xiaohongshuNoteId(url)) return processXiaohongshu(client, initial, url);
   if (!url || strategy(url) !== "weibo") {
     return "skipped";
   }
@@ -158,7 +244,8 @@ export async function processBookmark(client: KarakeepClient, bookmark: Bookmark
     throw new Error(`Too many Weibo images: ${capture.images.length}`);
   const imageBlobs: Blob[] = [];
   for (const image of capture.images) imageBlobs.push(await downloadImage(image.url));
-  const archive = await ensureArchiveContent(client, initial, capture, imageBlobs, url.href);
+  const html = await buildReaderHtml(capture, imageBlobs, url.href);
+  const archive = await ensureArchiveContent(client, initial, html, url.href, "weibo");
   const skipScreenshot = Bun.env.SKIP_SCREENSHOT === "1";
   const shot = skipScreenshot ? null : await screenshot(url.href, capture.title);
   const current = await client.getBookmark(bookmark.id);

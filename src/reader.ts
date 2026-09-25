@@ -1,4 +1,5 @@
 import type { WeiboCapture } from "./weibo";
+import type { XiaohongshuCapture } from "./xiaohongshu";
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => {
@@ -11,6 +12,33 @@ function escapeHtml(value: string): string {
     };
     return entities[character];
   });
+}
+
+export async function buildXiaohongshuReaderHtml(
+  capture: XiaohongshuCapture,
+  images: Blob[],
+  canonicalUrl: string,
+): Promise<string> {
+  if (images.length !== capture.images.length) throw new Error("Reader image count mismatch");
+  const paragraphs = capture.description
+    .split(/\n+/)
+    .filter(Boolean)
+    .map((line) => `<p>${escapeHtml(line)}</p>`)
+    .join("\n");
+  const figures: string[] = [];
+  for (const [index, blob] of images.entries()) {
+    if (!blob.type.startsWith("image/"))
+      throw new Error(`Reader image ${index + 1} is not an image`);
+    const bytes = Buffer.from(await blob.arrayBuffer());
+    figures.push(
+      `<figure><img src="data:${escapeHtml(blob.type)};base64,${bytes.toString("base64")}" alt="笔记配图 ${index + 1}" loading="lazy"></figure>`,
+    );
+  }
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(capture.title)}</title><link rel="canonical" href="${escapeHtml(canonicalUrl)}">
+<style>.kara-recap-reader{max-width:46rem;margin:2rem auto;padding:0 1rem;font:1.1rem/1.8 system-ui,sans-serif;color:#202124}.kara-recap-reader article{overflow-wrap:anywhere}.kara-recap-reader figure{margin:1.5rem 0}.kara-recap-reader img{display:block;max-width:100%;height:auto;border-radius:.5rem}.kara-recap-reader p{margin:.8rem 0}</style>
+</head><body><main class="kara-recap-reader"><article><h1>${escapeHtml(capture.title)}</h1>${paragraphs}${figures.join("\n")}</article></main></body></html>`;
 }
 
 export async function buildReaderHtml(
