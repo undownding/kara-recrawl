@@ -8,7 +8,7 @@
 
 将 `.env.example` 复制成 `.env`，填写 `KARAKEEP_API_KEY` 和 `KARAKEEP_WEBHOOK_TOKEN`。`KARAKEEP_URL` 留空时使用官方云端地址，自托管时填服务器根地址。服务默认监听 `0.0.0.0:3000`，健康检查为 `GET /health`。
 
-在 Karakeep 的 webhook 设置中，创建目标为 `http://<kara-recap主机>:3000/webhook` 的 webhook，只订阅 **`crawled`** 事件，并将其 token 设为与 `KARAKEEP_WEBHOOK_TOKEN` 相同的值。Karakeep 会发送 `Authorization: Bearer <token>`。若两个服务运行在不同容器中，请填 Karakeep 容器能访问的地址；`localhost` 通常指向 Karakeep 容器自身。服务器收到合法事件后立即返回 `202`，后台串行处理，并对处理失败的事件最多尝试三次。同一进程内按 webhook `jobId` 去重；进程重启会清空队列，失败详情见容器日志。
+在 Karakeep 的 webhook 设置中，创建目标为 `http://<kara-recap主机>:3000/webhook` 的 webhook，只订阅 **`crawled`** 事件，并将其 token 设为与 `KARAKEEP_WEBHOOK_TOKEN` 相同的值。Karakeep 会发送 `Authorization: Bearer <token>`。若两个服务运行在不同容器中，请填 Karakeep 容器能访问的地址；`localhost` 通常指向 Karakeep 容器自身。Karakeep 默认阻止 worker 访问内网地址，TrueNAS 上使用内网 webhook 时，需在 **Karakeep 应用自身**配置 `CRAWLER_ALLOWED_INTERNAL_HOSTNAMES`，允许该目标主机名。服务器收到合法事件后立即返回 `202`，后台串行处理，并对处理失败的事件最多尝试三次。同一进程内按 webhook `jobId` 去重；进程重启会清空队列，失败详情见容器日志。
 
 ## Docker 运行
 
