@@ -41,7 +41,7 @@ test("collects only note text and every carousel image", async () => {
       desc: "第一行\n第二行",
       imageList: [
         { urlDefault: "https://ci.xiaohongshu.com/one" },
-        { infoList: [{ url: "https://sns-webpic-qc.xhscdn.com/two" }] },
+        { infoList: [{ url: "http://sns-webpic-qc.xhscdn.com/two" }] },
       ],
       comments: [{ content: "不应抓取" }],
     },

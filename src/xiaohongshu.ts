@@ -1,3 +1,5 @@
+import { createWebView, prepareXiaohongshuView } from "./webview";
+
 export interface XiaohongshuCapture {
   id: string;
   title: string;
@@ -53,7 +55,7 @@ export function parseXiaohongshuNote(value: unknown, expectedId: string): Xiaoho
     if (!candidate) throw new Error(`Xiaohongshu note ${expectedId} is missing image ${index + 1}`);
     const url = new URL(candidate.startsWith("//") ? `https:${candidate}` : candidate);
     if (
-      url.protocol !== "https:" ||
+      !["http:", "https:"].includes(url.protocol) ||
       !(
         url.hostname === "xhscdn.com" ||
         url.hostname.endsWith(".xhscdn.com") ||
@@ -62,6 +64,7 @@ export function parseXiaohongshuNote(value: unknown, expectedId: string): Xiaoho
       )
     )
       throw new Error(`Unexpected Xiaohongshu image host: ${url.hostname}`);
+    url.protocol = "https:";
     return { url: url.href };
   });
   return {
@@ -181,14 +184,8 @@ export async function captureXiaohongshu(
 ): Promise<{ capture: XiaohongshuCapture; screenshot: Blob | null }> {
   const id = xiaohongshuNoteId(url);
   if (!id) throw new Error(`Unsupported Xiaohongshu note URL: ${url}`);
-  await using view = new Bun.WebView({
-    width: 1280,
-    height: 900,
-    backend: { type: "chrome", argv: ["--no-sandbox", "--disable-dev-shm-usage"] },
-    ...(Bun.env.WEBVIEW_PROFILE_DIR
-      ? { dataStore: { directory: Bun.env.WEBVIEW_PROFILE_DIR } }
-      : {}),
-  });
+  await using view = createWebView(1440, 900);
+  await prepareXiaohongshuView(view);
   await view.navigate(url.href);
   let capture: XiaohongshuCapture | undefined;
   let lastPage = "unknown";

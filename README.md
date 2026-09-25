@@ -25,6 +25,8 @@ docker run --rm --env-file .env -p 3000:3000 --shm-size=1g kara-recap:local
 
 镜像包含 Chromium、Noto CJK 中文字体和 emoji 字体。要跳过截图，设置 `SKIP_SCREENSHOT=1`。若微博或小红书需要登录，可设置 `WEBVIEW_PROFILE_DIR` 并挂载持久浏览器资料目录；微博 JSON 接口如需登录，也可设置 `WEIBO_COOKIE`。请勿提交 `.env`。需要保留生成的 HTML 时，设置 `READER_OUTPUT_DIR=/output` 并挂载该目录。
 
+截图时 Bun.WebView 会启动镜像内的 Chromium，并通过 CDP 与它通信。中文字体直接使用镜像中的 Noto CJK，无需额外浏览器服务或字体注入。
+
 ### TrueNAS Reader 直写
 
 你的 Karakeep ixVolume 位于 `/mnt/.ix-apps/app_mounts/karakeep/data`。仓库中的 `compose.yaml` 已使用该目录、宿主机端口 `13000`、1 GiB Chromium 共享内存及健康检查。先在 TrueNAS 主机上把 `.env.example` 复制为 `.env`，配置 API key、webhook token，以及：

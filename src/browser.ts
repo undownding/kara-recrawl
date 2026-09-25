@@ -1,12 +1,7 @@
+import { createWebView } from "./webview";
+
 export async function screenshot(url: string, expectedText: string): Promise<Blob> {
-  await using view = new Bun.WebView({
-    width: 1280,
-    height: 900,
-    backend: { type: "chrome", argv: ["--no-sandbox", "--disable-dev-shm-usage"] },
-    ...(Bun.env.WEBVIEW_PROFILE_DIR
-      ? { dataStore: { directory: Bun.env.WEBVIEW_PROFILE_DIR } }
-      : {}),
-  });
+  await using view = createWebView(1280, 900);
   await view.navigate(url);
   const expected = expectedText.replace(/\s+/g, "").slice(0, 16);
   let ready = false;
