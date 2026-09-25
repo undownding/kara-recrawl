@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+node_modules/
+*.log
+*.png
+*.jpg
+*.jpeg
+.cache/
+browser-profile/
+reader-output/
+coverage/
+dist/
+.DS_Store
