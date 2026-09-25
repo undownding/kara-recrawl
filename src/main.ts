@@ -202,7 +202,7 @@ async function processXiaohongshu(
             ? "gif"
             : "jpg";
     const fileName = `xiaohongshu-${id}-image-${String(index + 1).padStart(2, "0")}.${ext}`;
-    const assetType = index === 0 ? "bannerImage" : "bookmarkAsset";
+    const assetType = "bannerImage";
     if (assets.some((asset) => asset.assetType === assetType && asset.fileName === fileName))
       continue;
     const assetId = await client.upload(blob, fileName);
@@ -334,14 +334,13 @@ export async function processBookmark(client: KarakeepClient, bookmark: Bookmark
       (asset) =>
         asset.assetType === "userUploaded" &&
         !!asset.fileName &&
-        (legacyNames.has(asset.fileName) || asset.fileName === fileName),
+        asset.fileName !== fileName &&
+        legacyNames.has(asset.fileName),
     );
-    if (
-      !assets.some((asset) => asset.assetType === "bookmarkAsset" && asset.fileName === fileName)
-    ) {
+    if (!assets.some((asset) => asset.assetType === "bannerImage" && asset.fileName === fileName)) {
       const assetId = await client.upload(blob, fileName);
       await client.attachAsset(bookmark.id, assetId, target.assetType);
-      assets.push({ id: assetId, fileName, assetType: "bookmarkAsset" });
+      assets.push({ id: assetId, fileName, assetType: "bannerImage" });
     }
     for (const duplicate of obsolete) {
       await client.detachAsset(bookmark.id, duplicate.id);

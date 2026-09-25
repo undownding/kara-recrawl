@@ -99,7 +99,7 @@ export class KarakeepClient {
   attachAsset(
     bookmarkId: string,
     assetId: string,
-    assetType: "bookmarkAsset" | "screenshot" | "bannerImage",
+    assetType: "screenshot" | "bannerImage",
   ): Promise<unknown> {
     return this.json(`bookmarks/${encodeURIComponent(bookmarkId)}/assets`, "POST", {
       id: assetId,

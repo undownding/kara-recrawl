@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import type { Bookmark, KarakeepClient } from "../src/karakeep";
+import { processBookmark } from "../src/main";
 import { buildXiaohongshuReaderHtml } from "../src/reader";
 import {
   NOTE_EXPRESSION,
@@ -172,5 +174,92 @@ test("public fetch rejects a redirected login page", async () => {
     ).toBeNull();
   } finally {
     globalThis.fetch = original;
+  }
+});
+
+test("attaches every Xiaohongshu image as a banner and skips them on retry", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSkip = Bun.env.SKIP_SCREENSHOT;
+  const originalDbPath = Bun.env.KARAKEEP_DB_PATH;
+  Bun.env.SKIP_SCREENSHOT = "1";
+  delete Bun.env.KARAKEEP_DB_PATH;
+  const url = `https://www.xiaohongshu.com/explore/${id}`;
+  const bookmark: Bookmark = { id: "bookmark-1", content: { type: "link", url } };
+  const assets: NonNullable<Bookmark["assets"]> = [];
+  const uploaded = new Map<string, string>();
+  const attached: string[] = [];
+  const note = {
+    note: {
+      noteDetailMap: {
+        [id]: {
+          note: {
+            noteId: id,
+            type: "normal",
+            title: "两张图",
+            desc: "正文",
+            imageList: [
+              { urlDefault: "https://ci.xiaohongshu.com/first" },
+              { urlDefault: "https://ci.xiaohongshu.com/second" },
+            ],
+          },
+        },
+      },
+    },
+  };
+  globalThis.fetch = (async (input) => {
+    const requestUrl = String(input);
+    if (requestUrl === url) {
+      const response = new Response(
+        `<script>window.__INITIAL_STATE__ = ${JSON.stringify(note)};</script>`,
+        { headers: { "content-type": "text/html" } },
+      );
+      Object.defineProperty(response, "url", { value: url });
+      return response;
+    }
+    if (requestUrl.startsWith("https://ci.xiaohongshu.com/")) {
+      return new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "image/jpeg" },
+      });
+    }
+    throw new Error(`Unexpected fetch: ${requestUrl}`);
+  }) as typeof fetch;
+  const client = {
+    async importSingleFile(_url: string, _html: string, fileName: string) {
+      if (!assets.some((asset) => asset.fileName === fileName))
+        assets.push({ id: "archive-1", fileName, assetType: "precrawledArchive" });
+      return bookmark;
+    },
+    async getBookmark() {
+      return { ...bookmark, assets: assets.map((asset) => ({ ...asset })) };
+    },
+    async upload(_blob: Blob, fileName: string) {
+      const assetId = `image-${uploaded.size + 1}`;
+      uploaded.set(assetId, fileName);
+      return assetId;
+    },
+    async attachAsset(_bookmarkId: string, assetId: string, assetType: string) {
+      if (assetType !== "bannerImage") throw new Error(`Unsupported asset type: ${assetType}`);
+      attached.push(assetType);
+      assets.push({ id: assetId, fileName: uploaded.get(assetId), assetType });
+    },
+    async updateBookmark() {
+      return bookmark;
+    },
+  } as unknown as KarakeepClient;
+  try {
+    expect(await processBookmark(client, bookmark)).toContain("updated Xiaohongshu");
+    expect(attached).toEqual(["bannerImage", "bannerImage"]);
+    expect([...uploaded.values()]).toEqual([
+      `xiaohongshu-${id}-image-01.jpg`,
+      `xiaohongshu-${id}-image-02.jpg`,
+    ]);
+    await processBookmark(client, bookmark);
+    expect(attached).toHaveLength(2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSkip === undefined) delete Bun.env.SKIP_SCREENSHOT;
+    else Bun.env.SKIP_SCREENSHOT = originalSkip;
+    if (originalDbPath === undefined) delete Bun.env.KARAKEEP_DB_PATH;
+    else Bun.env.KARAKEEP_DB_PATH = originalDbPath;
   }
 });

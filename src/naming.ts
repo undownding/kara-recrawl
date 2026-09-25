@@ -31,10 +31,10 @@ export function imageAttachment(
   sourceStatusId: string,
   index: number,
   mime: string,
-): { assetType: "bannerImage" | "bookmarkAsset"; fileName: string } {
+): { assetType: "bannerImage"; fileName: string } {
   return role === "original"
     ? { assetType: "bannerImage", fileName: bannerFileName(sourceStatusId, index, mime) }
-    : { assetType: "bookmarkAsset", fileName: imageFileName(bookmarkStatusId, index, mime) };
+    : { assetType: "bannerImage", fileName: imageFileName(bookmarkStatusId, index, mime) };
 }
 
 export function sanitizedChineseImageFileName(

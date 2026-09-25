@@ -20,7 +20,7 @@ test("maps original and repost pictures to Karakeep asset types", () => {
     fileName: "weibo-1-banner-01.jpg",
   });
   expect(imageAttachment("repost", "3", "2", 0, "image/jpeg")).toEqual({
-    assetType: "bookmarkAsset",
+    assetType: "bannerImage",
     fileName: "weibo-3-image-01.jpg",
   });
 });
