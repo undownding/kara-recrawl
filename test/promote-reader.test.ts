@@ -29,9 +29,9 @@ test("promotes only the matching HTML archive to Reader content", async () => {
     INSERT INTO bookmarks (id, userId, type) VALUES ('b1', 'u1', 'link');
     INSERT INTO bookmarkLinks (id, url, htmlContent) VALUES ('b1', 'https://m.weibo.cn/status/1', 'old');
     INSERT INTO assets (id, userId, bookmarkId, assetType, contentType, size)
-      VALUES ('a1', 'u1', 'b1', 'precrawledArchive', 'text/html', 100);
+      VALUES ('a1', 'u1', 'b1', 'linkPrecrawledArchive', 'text/html', 100);
     INSERT INTO assets (id, userId, bookmarkId, assetType, contentType, size)
-      VALUES ('other', 'u2', 'b1', 'precrawledArchive', 'text/html', 100);
+      VALUES ('other', 'u2', 'b1', 'linkPrecrawledArchive', 'text/html', 100);
   `);
   expect(() => promoteArchiveToReader(path, "b1", "other", "https://m.weibo.cn/status/1")).toThrow(
     "not this bookmark's HTML archive",

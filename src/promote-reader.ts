@@ -42,7 +42,7 @@ export function promoteArchiveToReader(
         !asset ||
         asset.userId !== link.userId ||
         asset.bookmarkId !== bookmarkId ||
-        asset.assetType !== "precrawledArchive" ||
+        asset.assetType !== "linkPrecrawledArchive" ||
         asset.contentType !== "text/html" ||
         asset.size <= 0
       ) {
