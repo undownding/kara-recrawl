@@ -12,7 +12,12 @@ import {
 import { buildReaderHtml, buildXiaohongshuReaderHtml } from "./reader";
 import { promoteArchiveToReader } from "./promote-reader";
 import { fetchWeibo } from "./weibo";
-import { captureXiaohongshu, resolveXiaohongshuUrl, xiaohongshuNoteId } from "./xiaohongshu";
+import {
+  captureXiaohongshu,
+  fetchPublicXiaohongshu,
+  resolveXiaohongshuUrl,
+  xiaohongshuNoteId,
+} from "./xiaohongshu";
 
 const IMAGE_LIMIT = 30 * 1024 * 1024;
 
@@ -156,7 +161,29 @@ async function processXiaohongshu(
   const id = xiaohongshuNoteId(url);
   if (!id) throw new Error(`Unsupported Xiaohongshu note URL: ${url}`);
   const skipScreenshot = Bun.env.SKIP_SCREENSHOT === "1";
-  const { capture, screenshot: shot } = await captureXiaohongshu(url, !skipScreenshot);
+  let publicCapture: Awaited<ReturnType<typeof fetchPublicXiaohongshu>> = null;
+  try {
+    publicCapture = await fetchPublicXiaohongshu(url);
+  } catch (error) {
+    console.warn(`Xiaohongshu public fetch failed for ${id}; trying WebView`, error);
+  }
+  let capture: NonNullable<typeof publicCapture>;
+  let shot: Blob | null = null;
+  if (publicCapture) {
+    capture = publicCapture;
+    if (!skipScreenshot) {
+      try {
+        shot = (await captureXiaohongshu(url, true)).screenshot;
+      } catch (error) {
+        console.warn(
+          `Xiaohongshu screenshot unavailable for ${id}; continuing with public note data`,
+          error,
+        );
+      }
+    }
+  } else {
+    ({ capture, screenshot: shot } = await captureXiaohongshu(url, !skipScreenshot));
+  }
   if (capture.images.length > 100)
     throw new Error(`Too many Xiaohongshu images: ${capture.images.length}`);
   const images: Blob[] = [];

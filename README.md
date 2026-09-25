@@ -4,7 +4,9 @@
 
 微博正文会生成便于阅读的 HTML，通过 SingleFile 接口回写为原书签的 `precrawledArchive`；顶层正文成为书签标题，全部正文进入描述。最内层原微博配图作为 `bannerImage`，转发链配图作为 `bookmarkAsset`，并附加网页截图。若 `KARAKEEP_DB_PATH` 指向可写的 Karakeep 数据库，服务还会将 HTML 归档设为 Reader 内容；路径未设置或文件不存在时跳过这一步。
 
-小红书只提取图文笔记的标题、正文和全部配图，不提取评论。首图作为 `bannerImage`，其余图片作为 `bookmarkAsset`，并生成 Reader HTML 和关闭登录弹窗后的网页截图。视频笔记会报错。小红书页面若直接跳转到独立登录页，需要配置 `WEBVIEW_PROFILE_DIR`，并在该浏览器资料目录中预先登录；关闭弹窗无法绕过独立登录页。
+小红书只提取图文笔记的标题、正文和全部配图，不提取评论，也不使用 OCR。先尝试从公开 HTML 的笔记状态读取完整图文；结果不足时回退到 Chromium WebView。首图作为 `bannerImage`，其余图片作为 `bookmarkAsset`，并生成 Reader HTML 和关闭登录弹窗后的网页截图。公开数据可用但浏览器无法打开笔记时，会保留图文归档并跳过截图。视频笔记会报错。小红书页面若直接跳转到独立登录页，需要配置 `WEBVIEW_PROFILE_DIR`，并在该浏览器资料目录中预先登录；关闭弹窗无法绕过独立登录页。
+
+如果日志显示 `Xiaohongshu blocked browser access (300012): IP at risk`，这是小红书返回的“安全限制”页面，笔记数据未加载。需要检查容器的出站网络/IP；增加等待时间或关闭登录弹窗无法恢复这类页面。
 
 ## 配置 webhook
 
