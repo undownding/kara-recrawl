@@ -5,11 +5,23 @@ export interface WeiboPost {
   text_raw?: string;
   isLongText?: boolean;
   longText?: { longTextContent?: string };
-  pics?: Array<{ pid?: string; large?: { url?: string }; url?: string }>;
+  pics?: Array<{
+    pid?: string;
+    large?: { url?: string };
+    url?: string;
+    type?: string;
+    videoSrc?: string;
+  }>;
   pic_num?: number;
   pic_ids?: string[];
   pic_infos?: Record<string, { largest?: { url?: string }; large?: { url?: string } }>;
   retweeted_status?: WeiboPost;
+  page_info?: {
+    type?: string;
+    object_id?: string;
+    media_info?: { stream_url?: string; stream_url_hd?: string };
+    urls?: Record<string, string>;
+  };
 }
 
 export interface WeiboCapture {
@@ -17,6 +29,7 @@ export interface WeiboCapture {
   description: string;
   posts: Array<{ id: string; text: string; role: "original" | "repost" }>;
   images: Array<{ key: string; url: string; sourceStatusId: string; role: "original" | "repost" }>;
+  videos: Array<{ key: string; url: string; sourceStatusId: string; role: "original" | "repost" }>;
 }
 
 export function statusId(url: URL): string {
@@ -96,6 +109,7 @@ export function collectCapture(root: WeiboPost): WeiboCapture {
     role: (index === chain.length - 1 ? "original" : "repost") as "original" | "repost",
   }));
   const images: WeiboCapture["images"] = [];
+  const videos: WeiboCapture["videos"] = [];
   const seen = new Map<string, number>();
   for (const [index, item] of chain.entries()) {
     const role = index === chain.length - 1 ? "original" : "repost";
@@ -109,8 +123,41 @@ export function collectCapture(root: WeiboPost): WeiboCapture {
         images[previous] = { ...image, sourceStatusId, role };
       }
     }
+    const videoPictures = (item.pics ?? []).filter((pic) => pic.type === "video");
+    for (const [videoIndex, pic] of videoPictures.entries()) {
+      const url =
+        pic.videoSrc ??
+        (videoPictures.length === 1
+          ? (item.page_info?.urls?.mp4_720p_mp4 ??
+            item.page_info?.media_info?.stream_url_hd ??
+            item.page_info?.media_info?.stream_url)
+          : undefined);
+      if (!url) throw new Error(`Weibo ${sourceStatusId} is missing video ${videoIndex + 1}`);
+      if (!videos.some((video) => video.url === url))
+        videos.push({
+          key: pic.pid ?? `${sourceStatusId}-${videoIndex}`,
+          url,
+          sourceStatusId,
+          role,
+        });
+    }
+    if (item.page_info?.type === "video" && !videoPictures.length) {
+      const url =
+        item.page_info.urls?.mp4_720p_mp4 ??
+        item.page_info.media_info?.stream_url_hd ??
+        item.page_info.media_info?.stream_url;
+      if (!url) throw new Error(`Weibo ${sourceStatusId} has video metadata but no MP4 URL`);
+      if (!videos.some((video) => video.url === url))
+        videos.push({ key: item.page_info.object_id ?? sourceStatusId, url, sourceStatusId, role });
+    }
   }
-  return { title: texts[0], description: texts.join("\n\n—— 转发原文 ——\n\n"), posts, images };
+  return {
+    title: texts[0],
+    description: texts.join("\n\n—— 转发原文 ——\n\n"),
+    posts,
+    images,
+    videos,
+  };
 }
 
 const WEIBO_USER_AGENT =

@@ -1,10 +1,12 @@
 # kara-recap
 
-收到 Karakeep 的 `crawled` webhook 后，用 Bun + TypeScript 重新处理对应书签。目前支持 `m.weibo.cn/status/{id}`、`weibo.cn/status/{id}` 及微博分享链接，也支持小红书图文笔记的 `discovery/item/{id}`、`explore/{id}` 和 `xhslink.cn/o/...` 短链。其他 URL 会跳过，不修改书签。
+收到 Karakeep 的 `crawled` webhook 后，用 Bun + TypeScript 重新处理对应书签。目前支持 `m.weibo.cn/status/{id}`、`weibo.cn/status/{id}` 及微博分享链接，也支持小红书图文、视频笔记的 `discovery/item/{id}`、`explore/{id}` 和 `xhslink.cn/o/...` 短链。其他 URL 会跳过，不修改书签。
 
-微博正文会生成便于阅读的 HTML，通过 SingleFile 接口回写为原书签的 `precrawledArchive`；顶层正文成为书签标题，全部正文进入描述。最内层原微博和转发链配图均作为 `bannerImage`，并附加网页截图。若 `KARAKEEP_DB_PATH` 指向可写的 Karakeep 数据库，服务还会将 HTML 归档设为 Reader 内容；路径未设置或文件不存在时跳过这一步。
+微博正文会生成便于阅读的 HTML，通过 SingleFile 接口回写为原书签的 `precrawledArchive`；顶层正文成为书签标题，全部正文进入描述。最内层原微博和转发链配图均作为 `bannerImage`；视频以 MP4 存为 `userUploaded` 附件。图文视频混排时会保存图片、视频封面和视频，并尽可能附加网页截图。若 `KARAKEEP_DB_PATH` 指向可写的 Karakeep 数据库，服务还会将 HTML 归档设为 Reader 内容；路径未设置或文件不存在时跳过这一步。
 
-小红书只提取图文笔记的标题、正文和全部配图，不提取评论，也不使用 OCR。先尝试从公开 HTML 的笔记状态读取完整图文；结果不足时回退到 Chromium WebView。全部配图均作为 `bannerImage`，并生成 Reader HTML 和关闭登录弹窗后的网页截图。公开数据可用但浏览器无法打开笔记时，会保留图文归档并跳过截图。视频笔记会报错。小红书页面若直接跳转到独立登录页，需要配置 `WEBVIEW_PROFILE_DIR`，并在该浏览器资料目录中预先登录；关闭弹窗无法绕过独立登录页。
+小红书提取笔记的标题、正文、全部配图及视频，不提取评论，也不使用 OCR。先尝试从公开 HTML 的笔记状态读取媒体；结果不足时回退到 Chromium WebView。配图和视频封面作为 `bannerImage`，视频以 MP4 存为 `userUploaded` 附件，并生成含媒体内容的 Reader HTML 和关闭登录弹窗后的网页截图。公开数据可用但浏览器无法打开笔记时，会保留归档并跳过截图。小红书页面若直接跳转到独立登录页，需要配置 `WEBVIEW_PROFILE_DIR`，并在该浏览器资料目录中预先登录；关闭弹窗无法绕过独立登录页。
+
+Reader HTML 会内嵌 MP4，因此视频归档可能较大。Karakeep 默认的 `MAX_ASSET_SIZE_MB` 是 50；视频或 HTML 归档超过该限制时，需要在 Karakeep 中提高此值。本服务对单段视频的下载上限是 300 MiB。
 
 如果日志显示 `Xiaohongshu blocked browser access (300012): IP at risk`，这是小红书返回的“安全限制”页面，笔记数据未加载。需要检查容器的出站网络/IP；增加等待时间或关闭登录弹窗无法恢复这类页面。
 

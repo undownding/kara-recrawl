@@ -67,13 +67,13 @@ test("collects only note text and every carousel image", async () => {
   expect(html).not.toContain("不应抓取");
 });
 
-test("rejects video and incomplete image posts", () => {
+test("rejects video without a stream and incomplete image posts", () => {
   expect(() =>
     parseXiaohongshuNote(
       { type: "video", title: "视频", imageList: [{ urlDefault: "https://ci.xiaohongshu.com/a" }] },
       id,
     ),
-  ).toThrow("not an image post");
+  ).toThrow("has no MP4 stream");
   expect(() =>
     parseXiaohongshuNote({ type: "normal", title: "图文", imageList: [{}] }, id),
   ).toThrow("missing image 1");
@@ -157,6 +157,27 @@ test("public HTML extracts the exact note and full ordered image list", () => {
   expect(
     parsePublicXiaohongshuHtml(`<script>window.__INITIAL_STATE__ = {"note":{}};</script>`, id),
   ).toBeNull();
+});
+
+test("public mobile share state extracts video and cover without comments", () => {
+  const note = {
+    noteId: id,
+    type: "video",
+    title: "录像",
+    desc: "正文",
+    imageList: [{ infoList: [{ url: "http://sns-webpic-qc.xhscdn.com/cover.jpg" }] }],
+    video: {
+      media: { stream: { h264: [{ masterUrl: "http://sns-video-v6.xhscdn.com/movie.mp4" }] } },
+    },
+  };
+  const state = {
+    noteData: { data: { noteData: note, commentData: { comments: [{ content: "不应抓取" }] } } },
+  };
+  const html = `<script>window.__INITIAL_STATE__ = ${JSON.stringify(state).slice(0, -1)},"jsAssetsList":undefined};</script>`;
+  const capture = parsePublicXiaohongshuHtml(html, id);
+  expect(capture?.images).toEqual([{ url: "https://sns-webpic-qc.xhscdn.com/cover.jpg" }]);
+  expect(capture?.videos).toEqual([{ url: "https://sns-video-v6.xhscdn.com/movie.mp4" }]);
+  expect(capture?.description).not.toContain("不应抓取");
 });
 
 test("public fetch rejects a redirected login page", async () => {

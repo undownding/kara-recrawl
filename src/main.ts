@@ -11,7 +11,7 @@ import {
 } from "./naming";
 import { buildReaderHtml, buildXiaohongshuReaderHtml } from "./reader";
 import { promoteArchiveToReader } from "./promote-reader";
-import { fetchWeibo } from "./weibo";
+import { fetchWeibo, statusId } from "./weibo";
 import {
   captureXiaohongshu,
   fetchPublicXiaohongshu,
@@ -20,6 +20,7 @@ import {
 } from "./xiaohongshu";
 
 const IMAGE_LIMIT = 30 * 1024 * 1024;
+const VIDEO_LIMIT = 300 * 1024 * 1024;
 
 interface ReaderArchive {
   assetId: string;
@@ -81,6 +82,36 @@ async function downloadImage(
   const blob = await response.blob();
   if (!blob.size || blob.size > IMAGE_LIMIT) throw new Error(`Invalid image size: ${url}`);
   return new Blob([blob], { type: mime });
+}
+
+async function downloadVideo(value: string, source: "weibo" | "xiaohongshu"): Promise<Blob> {
+  const url = new URL(value);
+  if (url.protocol === "http:") url.protocol = "https:";
+  const allowed =
+    source === "weibo"
+      ? ["weibocdn.com", "sina.com.cn"].some(
+          (host) => url.hostname === host || url.hostname.endsWith(`.${host}`),
+        )
+      : ["xhscdn.com", "xiaohongshu.com"].some(
+          (host) => url.hostname === host || url.hostname.endsWith(`.${host}`),
+        );
+  if (url.protocol !== "https:" || !allowed)
+    throw new Error(`Unexpected ${source} video host: ${url.hostname}`);
+  const response = await fetch(url, {
+    headers: {
+      referer: source === "weibo" ? "https://m.weibo.cn/" : "https://www.xiaohongshu.com/",
+      "user-agent": "Mozilla/5.0",
+    },
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!response.ok) throw new Error(`Video download failed: HTTP ${response.status} ${url}`);
+  const mime = response.headers.get("content-type")?.split(";")[0].toLowerCase();
+  if (mime !== "video/mp4") throw new Error(`Unexpected video content type: ${mime}`);
+  const length = Number(response.headers.get("content-length") ?? 0);
+  if (length > VIDEO_LIMIT) throw new Error(`Video exceeds ${VIDEO_LIMIT} bytes: ${url}`);
+  const blob = await response.blob();
+  if (!blob.size || blob.size > VIDEO_LIMIT) throw new Error(`Invalid video size: ${url}`);
+  return new Blob([blob], { type: "video/mp4" });
 }
 
 async function ensureArchiveContent(
@@ -188,7 +219,9 @@ async function processXiaohongshu(
     throw new Error(`Too many Xiaohongshu images: ${capture.images.length}`);
   const images: Blob[] = [];
   for (const image of capture.images) images.push(await downloadImage(image.url, "xiaohongshu"));
-  const html = await buildXiaohongshuReaderHtml(capture, images, url.href);
+  const videos: Blob[] = [];
+  for (const video of capture.videos) videos.push(await downloadVideo(video.url, "xiaohongshu"));
+  const html = await buildXiaohongshuReaderHtml(capture, images, url.href, videos);
   const archive = await ensureArchiveContent(client, bookmark, html, url.href, "xiaohongshu");
   const current = await client.getBookmark(bookmark.id);
   const assets = current.assets ?? [];
@@ -219,6 +252,14 @@ async function processXiaohongshu(
     }
     await client.attachAsset(bookmark.id, assetId, assetType);
     assets.push({ id: assetId, fileName, assetType });
+  }
+  for (const [index, blob] of videos.entries()) {
+    const fileName = `xiaohongshu-${id}-video-${String(index + 1).padStart(2, "0")}.mp4`;
+    if (assets.some((asset) => asset.assetType === "userUploaded" && asset.fileName === fileName))
+      continue;
+    const assetId = await client.upload(blob, fileName);
+    await client.attachAsset(bookmark.id, assetId, "userUploaded");
+    assets.push({ id: assetId, fileName, assetType: "userUploaded" });
   }
   const screenshotName = `xiaohongshu-${id}-screenshot.png`;
   if (
@@ -271,10 +312,22 @@ export async function processBookmark(client: KarakeepClient, bookmark: Bookmark
     throw new Error(`Too many Weibo images: ${capture.images.length}`);
   const imageBlobs: Blob[] = [];
   for (const image of capture.images) imageBlobs.push(await downloadImage(image.url));
-  const html = await buildReaderHtml(capture, imageBlobs, url.href);
+  const videoBlobs: Blob[] = [];
+  for (const video of capture.videos) videoBlobs.push(await downloadVideo(video.url, "weibo"));
+  const html = await buildReaderHtml(capture, imageBlobs, url.href, videoBlobs);
   const archive = await ensureArchiveContent(client, initial, html, url.href, "weibo");
   const skipScreenshot = Bun.env.SKIP_SCREENSHOT === "1";
-  const shot = skipScreenshot ? null : await screenshot(url.href, capture.title);
+  let shot: Blob | null = null;
+  if (!skipScreenshot) {
+    try {
+      shot = await screenshot(url.href, capture.title);
+    } catch (error) {
+      console.warn(
+        `Weibo screenshot unavailable for ${statusId(url)}; continuing with captured media`,
+        error,
+      );
+    }
+  }
   const current = await client.getBookmark(bookmark.id);
   const assets = current.assets ?? [];
   const status = url.pathname.match(/^\/(?:status|detail)\/([A-Za-z0-9]+)/)?.[1];
@@ -345,6 +398,15 @@ export async function processBookmark(client: KarakeepClient, bookmark: Bookmark
     for (const duplicate of obsolete) {
       await client.detachAsset(bookmark.id, duplicate.id);
     }
+  }
+
+  for (const [index, blob] of videoBlobs.entries()) {
+    const fileName = `weibo-${status}-video-${String(index + 1).padStart(2, "0")}.mp4`;
+    if (assets.some((asset) => asset.assetType === "userUploaded" && asset.fileName === fileName))
+      continue;
+    const assetId = await client.upload(blob, fileName);
+    await client.attachAsset(bookmark.id, assetId, "userUploaded");
+    assets.push({ id: assetId, fileName, assetType: "userUploaded" });
   }
 
   const screenshotName = screenshotFileName(status);

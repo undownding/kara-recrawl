@@ -5,6 +5,7 @@ export interface XiaohongshuCapture {
   title: string;
   description: string;
   images: Array<{ url: string }>;
+  videos: Array<{ url: string }>;
 }
 
 interface Note {
@@ -13,6 +14,23 @@ interface Note {
   title?: string;
   desc?: string;
   imageList?: Array<{ urlDefault?: string; urlPre?: string; infoList?: Array<{ url?: string }> }>;
+  video?: {
+    media?: { stream?: { h264?: Array<{ masterUrl?: string; backupUrls?: string[] }> } };
+    mediaV2?: string;
+  };
+}
+
+function mediaUrl(value: string, kind: "image" | "video"): string {
+  const url = new URL(value.startsWith("//") ? `https:${value}` : value);
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    !["xhscdn.com", "xiaohongshu.com"].some(
+      (host) => url.hostname === host || url.hostname.endsWith(`.${host}`),
+    )
+  )
+    throw new Error(`Unexpected Xiaohongshu ${kind} host: ${url.hostname}`);
+  url.protocol = "https:";
+  return url.href;
 }
 
 export function xiaohongshuNoteId(url: URL): string | null {
@@ -43,35 +61,44 @@ export function parseXiaohongshuNote(value: unknown, expectedId: string): Xiaoho
   const note = value as Note;
   if (note.noteId && note.noteId !== expectedId)
     throw new Error(`Xiaohongshu returned a different note: ${note.noteId}`);
-  if (note.type && note.type !== "normal")
-    throw new Error(`Xiaohongshu note ${expectedId} is not an image post`);
+  if (note.type && !["normal", "video"].includes(note.type))
+    throw new Error(`Unsupported Xiaohongshu note type: ${note.type}`);
   const title = note.title?.trim() || note.desc?.trim().split("\n")[0] || "";
   if (!title) throw new Error(`Xiaohongshu note ${expectedId} has no title or body`);
-  if (!Array.isArray(note.imageList) || note.imageList.length === 0)
+  if (note.type !== "video" && (!Array.isArray(note.imageList) || note.imageList.length === 0))
     throw new Error(`Xiaohongshu note ${expectedId} has no images`);
-  const images = note.imageList.map((image, index) => {
+  const images = (note.imageList ?? []).map((image, index) => {
     const candidate =
       image.urlDefault || image.infoList?.find((item) => item.url)?.url || image.urlPre;
     if (!candidate) throw new Error(`Xiaohongshu note ${expectedId} is missing image ${index + 1}`);
-    const url = new URL(candidate.startsWith("//") ? `https:${candidate}` : candidate);
-    if (
-      !["http:", "https:"].includes(url.protocol) ||
-      !(
-        url.hostname === "xhscdn.com" ||
-        url.hostname.endsWith(".xhscdn.com") ||
-        url.hostname === "xiaohongshu.com" ||
-        url.hostname.endsWith(".xiaohongshu.com")
-      )
-    )
-      throw new Error(`Unexpected Xiaohongshu image host: ${url.hostname}`);
-    url.protocol = "https:";
-    return { url: url.href };
+    return { url: mediaUrl(candidate, "image") };
   });
+  let stream = note.video?.media?.stream?.h264?.find(
+    (item) => item.masterUrl || item.backupUrls?.length,
+  );
+  if (!stream && note.video?.mediaV2) {
+    try {
+      const media = JSON.parse(note.video.mediaV2) as {
+        stream?: { h264?: Array<{ master_url?: string; backup_urls?: string[] }> };
+      };
+      const legacy = media.stream?.h264?.find(
+        (item) => item.master_url || item.backup_urls?.length,
+      );
+      if (legacy) stream = { masterUrl: legacy.master_url, backupUrls: legacy.backup_urls };
+    } catch {
+      /* The primary media field may still contain a usable stream. */
+    }
+  }
+  const videoUrl = stream?.masterUrl ?? stream?.backupUrls?.[0];
+  if (note.type === "video" && !videoUrl)
+    throw new Error(`Xiaohongshu video note ${expectedId} has no MP4 stream`);
+  const videos = videoUrl ? [{ url: mediaUrl(videoUrl, "video") }] : [];
   return {
     id: expectedId,
     title,
     description: [note.title?.trim(), note.desc?.trim()].filter(Boolean).join("\n\n") || title,
     images,
+    videos,
   };
 }
 
@@ -83,11 +110,45 @@ function unwrap(value: unknown): unknown {
 
 function noteFromState(state: unknown, id: string): unknown {
   const root = unwrap(state) as Record<string, unknown> | undefined;
+  const mobile = unwrap(
+    (
+      unwrap((root?.noteData as Record<string, unknown> | undefined)?.data) as
+        | Record<string, unknown>
+        | undefined
+    )?.noteData,
+  ) as Record<string, unknown> | undefined;
+  if (mobile?.noteId === id) return { ...mobile, imageList: unwrap(mobile.imageList) };
   const section = unwrap(root?.note) as Record<string, unknown> | undefined;
   const map = unwrap(section?.noteDetailMap) as Record<string, unknown> | undefined;
   const entry = unwrap(map?.[id]) as Record<string, unknown> | undefined;
   const note = unwrap(entry?.note ?? entry) as Record<string, unknown> | undefined;
   return note ? { ...note, imageList: unwrap(note.imageList) } : null;
+}
+
+function normalizeStateLiteral(source: string): string {
+  let result = "";
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    if (quoted) {
+      result += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') {
+      quoted = true;
+      result += char;
+    } else if (
+      source.startsWith("undefined", index) &&
+      !/[\w$]/.test(source[index - 1] ?? "") &&
+      !/[\w$]/.test(source[index + 9] ?? "")
+    ) {
+      result += "null";
+      index += 8;
+    } else result += char;
+  }
+  return result;
 }
 
 function embeddedState(html: string): unknown {
@@ -109,7 +170,7 @@ function embeddedState(html: string): unknown {
     else if (char === "{") depth++;
     else if (char === "}" && --depth === 0) {
       try {
-        return JSON.parse(html.slice(start, index + 1));
+        return JSON.parse(normalizeStateLiteral(html.slice(start, index + 1)));
       } catch {
         return null;
       }
@@ -155,7 +216,9 @@ export const NOTE_EXPRESSION = `(() => {
   const id = __NOTE_ID__;
   const entry = unwrap(map?.[id]);
   const note = unwrap(entry?.note ?? entry);
-  return note ? JSON.stringify({ noteId: note.noteId, type: note.type, title: note.title, desc: note.desc, imageList: unwrap(note.imageList) }) : null;
+  const mobile = unwrap(unwrap(window.__INITIAL_STATE__?.noteData)?.data)?.noteData;
+  const selected = note ?? (mobile?.noteId === id ? mobile : null);
+  return selected ? JSON.stringify({ noteId: selected.noteId, type: selected.type, title: selected.title, desc: selected.desc, imageList: unwrap(selected.imageList), video: unwrap(selected.video) }) : null;
 })()`;
 
 export function xiaohongshuAccessError(

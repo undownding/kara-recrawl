@@ -13,6 +13,7 @@ test("renders readable repost sections with embedded original pictures", async (
       images: [
         { key: "p", url: "https://wx1.sinaimg.cn/p.jpg", sourceStatusId: "1", role: "original" },
       ],
+      videos: [],
     },
     [new Blob([Uint8Array.from([1, 2, 3])], { type: "image/jpeg" })],
     "https://m.weibo.cn/status/2",
@@ -27,4 +28,29 @@ test("renders readable repost sections with embedded original pictures", async (
   const selectors = [...styles!.matchAll(/([^{}]+)\{/g)].map((match) => match[1].trim());
   expect(selectors.length).toBeGreaterThan(0);
   expect(selectors.every((selector) => selector.startsWith(".kara-recap-reader"))).toBe(true);
+});
+
+test("embeds a playable MP4 in the Weibo reader", async () => {
+  const html = await buildReaderHtml(
+    {
+      title: "视频",
+      description: "视频",
+      posts: [{ id: "1", text: "视频", role: "original" }],
+      images: [],
+      videos: [
+        {
+          key: "video",
+          url: "https://f.video.weibocdn.com/a.mp4",
+          sourceStatusId: "1",
+          role: "original",
+        },
+      ],
+    },
+    [],
+    "https://m.weibo.cn/status/1",
+    [new Blob([Uint8Array.from([0, 1, 2])], { type: "video/mp4" })],
+  );
+  expect(html).toContain(
+    '<video controls preload="metadata" playsinline src="data:video/mp4;base64,AAEC"',
+  );
 });
